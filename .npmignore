@@ -1,0 +1,6 @@
+/tmp/
+*.log
+.DS_Store
+
+# generated plugin output (built from prompts/, pushed to git repo separately)
+dist/

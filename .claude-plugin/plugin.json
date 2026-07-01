@@ -1,0 +1,19 @@
+{
+  "name": "loopai",
+  "version": "0.2.0",
+  "description": "Loop engineering for AI coding agents. One canonical loop, installed into Claude Code, Gemini CLI, Codex CLI, or Cursor.",
+  "author": {
+    "name": "Javaid Naik"
+  },
+  "homepage": "https://github.com/javaidnaik/loopAI",
+  "license": "MIT",
+  "keywords": [
+    "loop-engineering",
+    "claude-code",
+    "gemini-cli",
+    "codex",
+    "cursor",
+    "ai-agents",
+    "automation"
+  ]
+}

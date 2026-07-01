@@ -1,0 +1,13 @@
+{
+  "name": "javaid-loops",
+  "owner": {
+    "name": "Javaid Naik"
+  },
+  "plugins": [
+    {
+      "name": "loopai",
+      "source": "./",
+      "description": "Loop engineering for AI coding agents. One canonical loop, installed into Claude Code, Gemini CLI, Codex CLI, or Cursor."
+    }
+  ]
+}
