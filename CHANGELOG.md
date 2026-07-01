@@ -3,7 +3,7 @@
 All notable changes to loopAI are documented here. Format follows
 Keep a Changelog, and the project uses semantic versioning.
 
-## [0.2.0] - 2026-06-30
+## [0.3.0] - 2026-06-30
 
 ### Added
 - Four new commands, installed across all tools:
