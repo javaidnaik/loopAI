@@ -1,0 +1,14 @@
+{
+  "goal": "Report outdated dependencies and propose safe patch and minor version bumps",
+  "rules": [
+    "Report only: do not edit package.json, lockfiles, or any project file (L1)",
+    "List each outdated dependency with current version, latest safe version, and the changelog link",
+    "Flag any major version bump separately with a one-line risk note",
+    "Verify the proposed set resolves together before proposing it",
+    "Group the proposal as one copy-paste command"
+  ],
+  "inputs": ["package.json"],
+  "maxRounds": 3,
+  "autonomy": "L1",
+  "humanGate": true
+}

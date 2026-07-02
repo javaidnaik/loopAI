@@ -1,0 +1,14 @@
+{
+  "goal": "Reproduce the reported bug, minimise it to the smallest failing case, then fix it without breaking anything else",
+  "rules": [
+    "First produce a reliable reproduction and record the exact steps or failing test in the log",
+    "Minimise before fixing: strip the reproduction to the smallest input that still fails",
+    "The fix must make the reproduction pass and the full test suite stay green",
+    "State the root cause in one sentence in the log, not just the symptom",
+    "No speculative fixes: every change must trace to the reproduced cause"
+  ],
+  "inputs": ["src/"],
+  "maxRounds": 6,
+  "autonomy": "L2",
+  "humanGate": true
+}

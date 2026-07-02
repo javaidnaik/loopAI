@@ -1,0 +1,12 @@
+{
+  "goal": "README install steps match the non-underscore scripts in package.json",
+  "rules": [
+    "Every package.json script not prefixed with _ is documented in the README",
+    "No script listed in the README that no longer exists",
+    "Report drift only - do not edit files (L1)"
+  ],
+  "inputs": ["package.json", "README.md"],
+  "maxRounds": 4,
+  "autonomy": "L1",
+  "humanGate": true
+}

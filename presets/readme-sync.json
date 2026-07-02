@@ -1,0 +1,14 @@
+{
+  "goal": "Keep the README's install and usage sections matching the real scripts and commands in the project",
+  "rules": [
+    "Report only: propose the diff, do not edit files (L1)",
+    "Every public script in package.json appears in the README with a one-line description",
+    "No script listed in the README that no longer exists in the project",
+    "Install steps must match the actual package name and current install method",
+    "Keep the proposed wording in the project's existing README voice"
+  ],
+  "inputs": ["package.json", "README.md"],
+  "maxRounds": 4,
+  "autonomy": "L1",
+  "humanGate": true
+}

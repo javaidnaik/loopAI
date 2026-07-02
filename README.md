@@ -59,6 +59,50 @@ and they work in every project. The other three install per project.
 Open `.loops/state/<slug>.STATE.md` afterward to read the full round-by-round
 record.
 
+## Skip the interview: preset specs
+
+Five proven loops ship with the CLI. Drop one in and run it, no grilling needed:
+
+```
+loopai spec                 # list presets
+loopai spec readme-sync     # the safe first loop (report-only)
+loopai spec dep-bump        # propose safe dependency bumps (report-only)
+loopai spec pr-review       # strict senior-engineer review of your branch
+loopai spec test-first      # TDD loop: red test first, then the fix
+loopai spec bug-hunt        # reproduce, minimise, fix
+```
+
+Open the spec after dropping it and adjust rules or inputs to your repo.
+
+## Check yourself: doctor and list
+
+```
+loopai doctor    # is this repo loop-ready? scores setup, specs, test command
+loopai list      # every spec here, with its last verdict
+```
+
+## Loops that run without you: cron
+
+The whole promise of loop engineering is loops that run while you do other
+work. `cron` emits a GitHub Action that runs a spec on a schedule and opens
+the report as a GitHub issue:
+
+```
+loopai cron dep-bump --agent claude --schedule "0 6 * * 1"
+```
+
+Scheduled runs are forced to L1 report-only no matter what the spec says,
+because there is no human at the gate. You still need to wire your agent CLI's
+headless auth on the runner before enabling the workflow. Full setup for both
+Claude and Gemini, with a sanity checklist, is in [docs/HEADLESS.md](docs/HEADLESS.md).
+
+## Proof it works: examples
+
+The `examples/` folder holds three recorded runs with full round logs: a
+test-fixing loop where the checker catches a regression the maker introduced,
+a report-only dependency bump, and a one-round README sync. Read them to watch
+the maker and checker argue and converge.
+
 ## Why one source
 
 The loop logic lives in one place: the three prompt files in `prompts/`. The

@@ -1,0 +1,14 @@
+{
+  "goal": "Implement the requested change using test-driven development: a failing test comes first, then the code that makes it pass",
+  "rules": [
+    "A new or updated test must exist and must have failed before the implementation change (red first)",
+    "After the implementation, the full test suite passes",
+    "No test may be weakened, skipped, or deleted to force a pass",
+    "Only source files may change in the implementation step, not test expectations",
+    "Keep the change minimal: no refactors beyond what the test requires"
+  ],
+  "inputs": ["src/", "test/"],
+  "maxRounds": 5,
+  "autonomy": "L2",
+  "humanGate": true
+}

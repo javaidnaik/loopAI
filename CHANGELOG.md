@@ -3,6 +3,20 @@
 All notable changes to loopAI are documented here. Format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.4.0] - 2026-07-01
+
+### Added
+- `loopai spec <name>`: preset spec library. Five proven loops ship with the
+  CLI (test-first, bug-hunt, dep-bump, readme-sync, pr-review). Value in 60
+  seconds, no grilling needed.
+- `loopai doctor`: loop-readiness check for the current repo (setup, spec
+  validity, test command, gitignore hygiene) with a score and fixes.
+- `loopai list`: shows every spec with its last verdict.
+- `loopai cron <slug>`: emits a GitHub Action that runs a spec on a schedule
+  (Claude or Gemini headless) and opens the report as an issue. Scheduled runs
+  are forced to L1 report-only.
+- `examples/`: three recorded runs with full maker/checker round logs.
+
 ## [0.3.0] - 2026-06-30
 
 ### Added

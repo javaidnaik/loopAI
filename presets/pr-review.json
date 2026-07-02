@@ -1,0 +1,14 @@
+{
+  "goal": "Review the current branch's diff against main like a strict senior engineer and produce an actionable review",
+  "rules": [
+    "Report only: never edit files (L1)",
+    "Check for: missing tests on changed logic, error handling gaps, N+1 or obvious performance issues, security smells (injection, secrets, unsafe input), and naming that hides intent",
+    "Every finding must name the file and line region and say why it matters in one sentence",
+    "Separate blockers from nitpicks; do not mix them",
+    "End with a verdict: approve, approve with nits, or request changes"
+  ],
+  "inputs": ["git diff main...HEAD"],
+  "maxRounds": 2,
+  "autonomy": "L1",
+  "humanGate": true
+}

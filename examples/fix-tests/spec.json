@@ -1,0 +1,12 @@
+{
+  "goal": "All tests in the cart module pass without breaking any other test",
+  "rules": [
+    "npm test passes fully",
+    "Only files under src/cart may be edited",
+    "Test files must not be modified"
+  ],
+  "inputs": ["src/cart", "test/cart"],
+  "maxRounds": 5,
+  "autonomy": "L2",
+  "humanGate": true
+}
