@@ -96,6 +96,39 @@ because there is no human at the gate. You still need to wire your agent CLI's
 headless auth on the runner before enabling the workflow. Full setup for both
 Claude and Gemini, with a sanity checklist, is in [docs/HEADLESS.md](docs/HEADLESS.md).
 
+## Run loops right in your terminal
+
+You do not need to be inside a chat session. `run` drives the whole loop from
+your shell using the Claude or Gemini CLI headlessly:
+
+```
+loopai run readme-sync --agent claude
+```
+
+You watch the maker and checker rounds stream, answer the human gate with a
+keypress, and get the full round log in `.loops/state/<slug>.STATE.md`. L1
+specs instruct the maker to propose changes only, never edit files.
+
+Every run is recorded, and `stats` tells you which loops are earning trust:
+
+```
+loopai stats
+# readme-sync   runs: 5   pass rate: 100%   avg rounds: 1.4   <- earning L2/L3 trust
+```
+
+A loop with three or more runs at a 100% pass rate is your signal to consider
+raising its autonomy. That decision now comes from data, not vibes.
+
+After updating the package (`npm update -g @javaidnaik/loopai`), refresh the
+command files installed in your tools with one command:
+
+```
+loopai upgrade
+```
+
+It remembers which tools you installed for and brings their command files up
+to the current version.
+
 ## Proof it works: examples
 
 The `examples/` folder holds three recorded runs with full round logs: a

@@ -3,6 +3,20 @@
 All notable changes to loopAI are documented here. Format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.5.0] - 2026-07-02
+
+### Added
+- `loopai run <slug>`: run a loop locally, right in the terminal, via the
+  Claude or Gemini CLI in headless mode. Streams maker/checker rounds, pauses
+  at the human gate, writes the full round log to `.loops/state/`, and records
+  the outcome. L1 specs instruct the maker to propose only, never edit.
+- `loopai stats`: pass rates, average rounds, and last-run date per loop, read
+  from `.loops/history.jsonl`. Flags loops with 3+ runs at 100% pass as
+  candidates for more autonomy. Every `run` appends to the history.
+- `loopai upgrade`: refreshes installed command files after an npm update.
+  `install` now records which tools were installed in `.loops/tools.json` so
+  `upgrade` knows what to refresh without asking.
+
 ## [0.4.0] - 2026-07-01
 
 ### Added
@@ -16,6 +30,9 @@ Keep a Changelog, and the project uses semantic versioning.
   (Claude or Gemini headless) and opens the report as an issue. Scheduled runs
   are forced to L1 report-only.
 - `examples/`: three recorded runs with full maker/checker round logs.
+- `docs/HEADLESS.md`: verified headless auth setup for scheduled loops, covering
+  Claude (setup-token OAuth or API key) and Gemini (AI Studio key, Vertex/ADC),
+  with a sanity checklist and cost notes. The cron command and README link to it.
 
 ## [0.3.0] - 2026-06-30
 

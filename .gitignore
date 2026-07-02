@@ -3,3 +3,5 @@ node_modules/
 dist/
 .loops/state/
 *.tgz
+.loops/history.jsonl
+.loops/tools.json

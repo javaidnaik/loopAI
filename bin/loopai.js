@@ -3,7 +3,8 @@
 // into the format each tool expects. Same loop logic everywhere - only the
 // wrapper envelope and the argument token change per tool.
 
-import { readFileSync, mkdirSync, writeFileSync } from "fs";
+import { readFileSync, mkdirSync, writeFileSync, appendFileSync, existsSync } from "fs";
+import { spawnSync } from "child_process";
 import * as fsAll from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -109,6 +110,10 @@ Usage:
   loopai spec               list available presets
   loopai list               show your specs and each one's last verdict
   loopai doctor             check this repo's loop-readiness
+  loopai run <slug>         run a loop right here via claude/gemini headless
+         [--agent claude|gemini]
+  loopai stats              pass rates and avg rounds per loop, from history
+  loopai upgrade            refresh installed command files after an npm update
   loopai cron <slug>        emit a GitHub Action that runs a spec on a schedule
          [--agent claude|gemini] [--schedule "0 6 * * 1"]
 
@@ -179,6 +184,142 @@ function cmdDoctor() {
   console.log(`\nScore: ${score}/${max}. ${score === max ? "Loop-ready." : "Fix the items above and run doctor again."}`);
 }
 
+// --- run: execute a loop locally via the agent CLI ---------------------------
+
+function callAgent(agent, instruction, stateBlob) {
+  // Prompt goes via stdin to dodge OS arg-length limits; the short instruction
+  // rides as the -p arg. Override the binary with LOOPAI_AGENT_BIN for testing.
+  const bin = process.env.LOOPAI_AGENT_BIN || agent;
+  const cliArgs = agent === "claude"
+    ? ["-p", instruction, "--output-format", "text"]
+    : ["-p", instruction];
+  const res = spawnSync(bin, cliArgs, {
+    input: stateBlob,
+    encoding: "utf-8",
+    maxBuffer: 32 * 1024 * 1024,
+    shell: process.platform === "win32",
+  });
+  if (res.error) throw new Error(`Could not run '${bin}': ${res.error.message}. Is the ${agent} CLI installed and on PATH?`);
+  if (res.status !== 0) throw new Error(`${agent} exited ${res.status}: ${(res.stderr || "").slice(0, 500)}`);
+  return (res.stdout || "").trim();
+}
+
+function askLine(q) {
+  return new Promise((resolve) => {
+    process.stdout.write(q);
+    process.stdin.resume();
+    process.stdin.once("data", (d) => { process.stdin.pause(); resolve(String(d).trim().toLowerCase()); });
+  });
+}
+
+function recordHistory(cwd, entry) {
+  const p = join(cwd, ".loops", "history.jsonl");
+  mkdirSync(dirname(p), { recursive: true });
+  appendFileSync(p, JSON.stringify(entry) + "\n");
+}
+
+async function cmdRun(args) {
+  const slug = args._[0];
+  if (!slug) { console.error("Usage: loopai run <spec-slug> [--agent claude|gemini]"); process.exit(1); }
+  const agent = args.agent;
+  if (!["claude", "gemini"].includes(agent)) { console.error("--agent must be claude or gemini."); process.exit(1); }
+  const cwd = process.cwd();
+  const specPath = join(cwd, ".loops", "specs", `${slug}.json`);
+  if (!existsSync(specPath)) { console.error(`No spec at .loops/specs/${slug}.json. Try 'loopai list' or 'loopai spec'.`); process.exit(1); }
+  const spec = JSON.parse(readFileSync(specPath, "utf-8"));
+  const ctxPath = join(cwd, ".loops", "CONTEXT.md");
+  const context = existsSync(ctxPath) ? readFileSync(ctxPath, "utf-8") : "(no CONTEXT.md - agents work from the spec alone)";
+
+  const statePath = join(cwd, ".loops", "state", `${slug}.STATE.md`);
+  mkdirSync(dirname(statePath), { recursive: true });
+  let state = `# STATE - ${spec.goal}\n\n## Goal\n${spec.goal}\n\n## Rules\n${(spec.rules || []).map((r) => `- ${r}`).join("\n")}\n\n## Inputs\n${(spec.inputs || []).map((i) => `- ${i}`).join("\n")}\n\n## Autonomy\n${spec.autonomy} | humanGate: ${spec.humanGate}\n\n## Round Log\n\n## Verdict\nPENDING\n`;
+  const saveState = () => writeFileSync(statePath, state);
+  const log = (t) => { state = state.replace("## Verdict", `${t}\n\n## Verdict`); saveState(); };
+  const setVerdict = (v) => { state = state.replace(/## Verdict\n[\s\S]*$/, `## Verdict\n${v}\n`); saveState(); };
+  saveState();
+
+  const l1Note = spec.autonomy === "L1"
+    ? "\nAUTONOMY L1: do NOT modify any project file. Write your proposed change (diff or snippet) as your reply instead."
+    : "";
+  const maxRounds = spec.maxRounds || 4;
+  console.log(`Running '${slug}' with ${agent} (${spec.autonomy}, gate: ${spec.humanGate}, max ${maxRounds} rounds)\n`);
+
+  let finalVerdict = `NO PASS after ${maxRounds} rounds - escalated to human`;
+  let roundsUsed = maxRounds;
+  for (let round = 1; round <= maxRounds; round++) {
+    console.log(`===== ROUND ${round} =====`);
+    const blob = `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`;
+
+    const draft = callAgent(agent,
+      `You are the MAKER in a maker/checker loop. Produce or revise work toward the Goal in the shared state provided on stdin. If the Round Log has CHECKER fixes, address exactly those. Stay inside the Rules and Inputs. Reply with only your output, no preamble.${l1Note}`,
+      blob);
+    console.log(`\nMAKER:\n${draft.slice(0, 2000)}${draft.length > 2000 ? "\n...(truncated in console, full text in STATE)" : ""}\n`);
+    log(`### Round ${round} - MAKER\n${draft}\n`);
+
+    const review = callAgent(agent,
+      `You are the CHECKER in a maker/checker loop, a strict read-only verifier. Check the latest MAKER output in the shared state on stdin against EVERY rule plus the Goal. Do not modify files. First line of your reply must be exactly PASS or FAIL; if FAIL, follow with a short bullet list of exactly what to fix. No preamble.`,
+      `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`);
+    console.log(`CHECKER:\n${review.slice(0, 1500)}\n`);
+    log(`### Round ${round} - CHECKER\n${review}\n`);
+
+    if (review.toUpperCase().startsWith("PASS")) {
+      const needGate = spec.humanGate || spec.autonomy !== "L3";
+      let accepted = true;
+      if (needGate) {
+        const ans = await askLine(`[HUMAN GATE] Checker passed. Accept as final? (y/n) `);
+        accepted = ans === "y" || ans === "yes";
+      }
+      if (accepted) { finalVerdict = `PASS (round ${round})`; roundsUsed = round; break; }
+      log(`### Round ${round} - HUMAN\nRejected, keep improving.\n`);
+    }
+  }
+  setVerdict(finalVerdict);
+  recordHistory(cwd, { slug, agent, verdict: finalVerdict.startsWith("PASS") ? "PASS" : "NO_PASS", rounds: roundsUsed, autonomy: spec.autonomy, date: new Date().toISOString() });
+  console.log(`\nVerdict: ${finalVerdict}`);
+  console.log(`Full round log: .loops/state/${slug}.STATE.md`);
+}
+
+// --- stats: what the history says about your loops ---------------------------
+
+function cmdStats() {
+  const p = join(process.cwd(), ".loops", "history.jsonl");
+  if (!existsSync(p)) { console.log("No history yet. Run a loop with `loopai run <slug>` first."); return; }
+  const rows = readFileSync(p, "utf-8").split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  if (!rows.length) { console.log("History file is empty."); return; }
+  const bySlug = {};
+  for (const r of rows) {
+    bySlug[r.slug] ||= { runs: 0, pass: 0, rounds: 0, last: "" };
+    const s = bySlug[r.slug];
+    s.runs++; if (r.verdict === "PASS") s.pass++; s.rounds += r.rounds || 0; s.last = r.date || s.last;
+  }
+  console.log(`Loop stats (${rows.length} runs recorded)\n`);
+  for (const [slug, s] of Object.entries(bySlug)) {
+    const rate = Math.round((s.pass / s.runs) * 100);
+    const avg = (s.rounds / s.runs).toFixed(1);
+    const trust = rate === 100 && s.runs >= 3 ? "  <- earning L2/L3 trust" : "";
+    console.log(`  ${slug}\n    runs: ${s.runs}   pass rate: ${rate}%   avg rounds: ${avg}   last: ${s.last.slice(0, 10)}${trust}\n`);
+  }
+  console.log("A loop with 3+ runs at 100% pass is a candidate for more autonomy.");
+}
+
+// --- upgrade: refresh installed command files after an npm update ------------
+
+function cmdUpgrade(args) {
+  const cwd = process.cwd();
+  const trackPath = join(cwd, ".loops", "tools.json");
+  let tools = args.tool ? (args.tool === "all" ? Object.keys(TOOLS) : [args.tool]) : null;
+  if (!tools) {
+    if (!existsSync(trackPath)) { console.error("No .loops/tools.json record. Tell me what to refresh: loopai upgrade --tool <claude|gemini|codex|cursor|all>"); process.exit(1); }
+    tools = JSON.parse(readFileSync(trackPath, "utf-8")).tools || [];
+  }
+  const invalid = tools.filter((t) => !TOOLS[t]);
+  if (invalid.length) { console.error(`Unknown tool(s): ${invalid.join(", ")}`); process.exit(1); }
+  console.log(`Refreshing loopAI commands for: ${tools.join(", ")}\n`);
+  tools.forEach((t) => TOOLS[t](cwd));
+  writeFileSync(trackPath, JSON.stringify({ tools, updated: new Date().toISOString() }, null, 2) + "\n");
+  console.log("\nDone. Installed command files now match this package version.");
+}
+
 function cmdCron(args) {
   const slug = args._[0];
   if (!slug) { console.error("Usage: loopai cron <spec-slug> [--agent claude|gemini] [--schedule \"0 6 * * 1\"]"); process.exit(1); }
@@ -238,6 +379,9 @@ function main() {
   if (args.help || action === "help" || !action) return help();
 
   if (action === "spec") return cmdSpec(args);
+  if (action === "run") return cmdRun(args);
+  if (action === "stats") return cmdStats();
+  if (action === "upgrade") return cmdUpgrade(args);
   if (action === "list") return cmdList();
   if (action === "doctor") return cmdDoctor();
   if (action === "cron") return cmdCron(args);
@@ -254,6 +398,11 @@ function main() {
   const tips = targets.map((t) => TOOLS[t](cwd));
   console.log("\nDone. Invoke with:");
   tips.forEach((t) => console.log("  " + t));
+  try {
+    const trackPath = join(cwd, ".loops", "tools.json");
+    mkdirSync(dirname(trackPath), { recursive: true });
+    writeFileSync(trackPath, JSON.stringify({ tools: targets, updated: new Date().toISOString() }, null, 2) + "\n");
+  } catch { /* tracking is best-effort */ }
   console.log("\nStart: run the init command, then grill to design a loop, then engineer <slug> to run it.");
   console.log("Or skip grilling: `loopai spec readme-sync` drops a safe preset you can run now.");
 }
