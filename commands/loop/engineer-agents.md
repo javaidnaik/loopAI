@@ -30,17 +30,22 @@ Spec slug: $ARGUMENTS
 For each round N:
 
 ### Maker phase
-Invoke the Task tool with `subagent_type: "loopai:maker"`. Give it the Goal,
+Write `.loops/.phase-lock.json` as `{"slug": "$ARGUMENTS", "phase": "maker",
+"autonomy": "<the spec's autonomy>"}` before dispatching, this arms a hook
+that blocks the subagent's Write/Edit tool calls when autonomy is L1. Then
+invoke the Task tool with `subagent_type: "loopai:maker"`. Give it the Goal,
 Rules, Inputs, Autonomy level, and the full current state file content
 (including any CHECKER feedback from the previous round) in the prompt. Append
 its reply under `### Round N - MAKER` in the state file.
 
 ### Checker phase
-Invoke the Task tool with `subagent_type: "loopai:checker"`, as a fresh call so
-it does not inherit the maker's context. Give it the Goal, Rules, Inputs, and
-the full current state file content, including the maker's output you just
-appended. Append its reply under `### Round N - CHECKER`. First line of its
-reply is either:
+Overwrite `.loops/.phase-lock.json` with `"phase": "checker"` (same slug and
+autonomy) before dispatching, the checker never edits files at any autonomy
+level and the lock enforces that. Invoke the Task tool with `subagent_type:
+"loopai:checker"`, as a fresh call so it does not inherit the maker's context.
+Give it the Goal, Rules, Inputs, and the full current state file content,
+including the maker's output you just appended. Append its reply under
+`### Round N - CHECKER`. First line of its reply is either:
 - `PASS` (optionally one short line on why), or
 - `FAIL` plus a short bullet list naming exactly what to fix next round.
 
@@ -56,6 +61,9 @@ reply is either:
 If maxRounds is hit with no accepted PASS, set Verdict to
 `NO PASS after <maxRounds> rounds - escalated to human` and summarize what is
 left for the user to decide.
+
+Once the loop ends, whatever the outcome, delete `.loops/.phase-lock.json` if
+it exists, so nothing stays locked after you are done.
 
 Give the user a one-line status after each round, naming which subagent said
 what. Never skip the checker phase, and never let the maker subagent edit

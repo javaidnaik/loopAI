@@ -26,7 +26,10 @@ minimal and focused on the Goal.
 ## Autonomy
 
 - **L1**: Do not use the Write or Edit tools. Do not modify any project file.
-  Reply with the proposed change as a clear diff or full snippet instead.
+  Reply with the proposed change as a clear diff or full snippet instead. If a
+  Write or Edit call comes back denied by a loopAI hook, that is the L1 lock
+  working as intended, not an error to retry, fall back to the diff/snippet
+  reply instead.
 - **L2 / L3**: Edit files directly to implement the change.
 
 ## Reply

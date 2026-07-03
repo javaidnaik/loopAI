@@ -3,7 +3,7 @@
 // into the format each tool expects. Same loop logic everywhere - only the
 // wrapper envelope and the argument token change per tool.
 
-import { readFileSync, mkdirSync, writeFileSync, appendFileSync, existsSync } from "fs";
+import { readFileSync, mkdirSync, writeFileSync, appendFileSync, existsSync, unlinkSync } from "fs";
 import { spawnSync } from "child_process";
 import * as fsAll from "fs";
 import { join, dirname } from "path";
@@ -269,34 +269,48 @@ async function cmdRun(args) {
   const pairingNote = makerAgent === checkerAgent ? "" : "  (cross-model check)";
   console.log(`Running '${slug}' - maker: ${makerAgent}, checker: ${checkerAgent}${pairingNote} (${spec.autonomy}, gate: ${spec.humanGate}, max ${maxRounds} rounds)\n`);
 
+  // Phase lock for the l1-guard hook (Claude Code plugin only): if the repo
+  // has loopAI installed as a plugin, the spawned claude -p maker/checker
+  // calls below get this enforced against Write/Edit, not just instructed.
+  const lockPath = join(cwd, ".loops", ".phase-lock.json");
+  const setLock = (phase) => writeFileSync(lockPath, JSON.stringify({ slug, phase, autonomy: spec.autonomy }));
+  const clearLock = () => { try { unlinkSync(lockPath); } catch { /* already gone */ } };
+
   let finalVerdict = `NO PASS after ${maxRounds} rounds - escalated to human`;
   let roundsUsed = maxRounds;
-  for (let round = 1; round <= maxRounds; round++) {
-    console.log(`===== ROUND ${round} =====`);
-    const blob = `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`;
+  try {
+    for (let round = 1; round <= maxRounds; round++) {
+      console.log(`===== ROUND ${round} =====`);
+      const blob = `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`;
 
-    const draft = callAgent(makerAgent,
-      `You are the MAKER in a maker/checker loop. Produce or revise work toward the Goal in the shared state provided on stdin. If the Round Log has CHECKER fixes, address exactly those. Stay inside the Rules and Inputs. Reply with only your output, no preamble.${l1Note}`,
-      blob);
-    console.log(`\nMAKER (${makerAgent}):\n${draft.slice(0, 2000)}${draft.length > 2000 ? "\n...(truncated in console, full text in STATE)" : ""}\n`);
-    log(`### Round ${round} - MAKER (${makerAgent})\n${draft}\n`);
+      setLock("maker");
+      const draft = callAgent(makerAgent,
+        `You are the MAKER in a maker/checker loop. Produce or revise work toward the Goal in the shared state provided on stdin. If the Round Log has CHECKER fixes, address exactly those. Stay inside the Rules and Inputs. Reply with only your output, no preamble.${l1Note}`,
+        blob);
+      console.log(`\nMAKER (${makerAgent}):\n${draft.slice(0, 2000)}${draft.length > 2000 ? "\n...(truncated in console, full text in STATE)" : ""}\n`);
+      log(`### Round ${round} - MAKER (${makerAgent})\n${draft}\n`);
 
-    const review = callAgent(checkerAgent,
-      `You are the CHECKER in a maker/checker loop, a strict read-only verifier. Check the latest MAKER output in the shared state on stdin against EVERY rule plus the Goal. Do not modify files. First line of your reply must be exactly PASS or FAIL; if FAIL, follow with a short bullet list of exactly what to fix. No preamble.`,
-      `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`);
-    console.log(`CHECKER (${checkerAgent}):\n${review.slice(0, 1500)}\n`);
-    log(`### Round ${round} - CHECKER (${checkerAgent})\n${review}\n`);
+      setLock("checker");
+      const review = callAgent(checkerAgent,
+        `You are the CHECKER in a maker/checker loop, a strict read-only verifier. Check the latest MAKER output in the shared state on stdin against EVERY rule plus the Goal. Do not modify files. First line of your reply must be exactly PASS or FAIL; if FAIL, follow with a short bullet list of exactly what to fix. No preamble.`,
+        `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`);
+      console.log(`CHECKER (${checkerAgent}):\n${review.slice(0, 1500)}\n`);
+      log(`### Round ${round} - CHECKER (${checkerAgent})\n${review}\n`);
 
-    if (review.toUpperCase().startsWith("PASS")) {
-      const needGate = spec.humanGate || spec.autonomy !== "L3";
-      let accepted = true;
-      if (needGate) {
-        const ans = await askLine(`[HUMAN GATE] Checker passed. Accept as final? (y/n) `);
-        accepted = ans === "y" || ans === "yes";
+      if (review.toUpperCase().startsWith("PASS")) {
+        const needGate = spec.humanGate || spec.autonomy !== "L3";
+        let accepted = true;
+        if (needGate) {
+          clearLock(); // the human gate is not a maker/checker phase, let them read freely
+          const ans = await askLine(`[HUMAN GATE] Checker passed. Accept as final? (y/n) `);
+          accepted = ans === "y" || ans === "yes";
+        }
+        if (accepted) { finalVerdict = `PASS (round ${round})`; roundsUsed = round; break; }
+        log(`### Round ${round} - HUMAN\nRejected, keep improving.\n`);
       }
-      if (accepted) { finalVerdict = `PASS (round ${round})`; roundsUsed = round; break; }
-      log(`### Round ${round} - HUMAN\nRejected, keep improving.\n`);
     }
+  } finally {
+    clearLock();
   }
   setVerdict(finalVerdict);
   recordHistory(cwd, { slug, maker: makerAgent, checker: checkerAgent, agent: makerAgent, verdict: finalVerdict.startsWith("PASS") ? "PASS" : "NO_PASS", rounds: roundsUsed, autonomy: spec.autonomy, date: new Date().toISOString() });

@@ -126,7 +126,12 @@ loopai run readme-sync --agent claude
 
 You watch the maker and checker rounds stream, answer the human gate with a
 keypress, and get the full round log in `.loops/state/<slug>.STATE.md`. L1
-specs instruct the maker to propose changes only, never edit files.
+specs instruct the maker to propose changes only, never edit files. `run`
+writes `.loops/.phase-lock.json` itself around each phase, so if the repo also
+has loopAI installed as a native Claude Code plugin, the spawned `claude -p`
+calls get that L1 rule hook-enforced (see Autonomy levels below), not just
+instructed. `npm install -g` alone does not install the plugin, `/plugin
+install` does, they are separate steps.
 
 ### Cross-model checking
 
@@ -193,6 +198,33 @@ argument token. The behavior you get is identical no matter which tool you run.
 Start every new loop at **L1 (report-only)** - the maker proposes, never edits.
 Move to **L2 (assisted edits, still gated)** once you trust it, then **L3
 (unattended)** only for low-risk, proven loops. The human gate defaults on.
+
+### L1 is enforced, not just promised (Claude Code only)
+
+Everywhere above, "L1: the maker does not edit files" is an instruction in the
+prompt. If you installed loopAI as a native Claude Code plugin, it is also a
+hook: `hooks/l1-guard.js` runs on every `Write`, `Edit`, and `NotebookEdit`
+call and checks `.loops/.phase-lock.json`, a small file the maker/checker
+orchestrator writes before each phase. It denies the call outright when the
+lock says `checker` (checkers never edit, at any autonomy level) or `maker`
+with autonomy `L1`. A stale lock (older than 20 minutes, e.g. a crashed
+session) is ignored, so a dead loop can never permanently block edits in your
+repo.
+
+How strong the guarantee is depends on which command set the lock:
+
+- **`loopai run`** (headless): bulletproof. `bin/loopai.js` is real code, it
+  writes and clears the lock itself, no model cooperation involved.
+- **`engineer-agents`**: very strong. The orchestrating session's only job
+  around each phase is "write the lock, then dispatch the subagent", a
+  simple instruction to get right.
+- **`engineer`**: strong, but the same session sets its own lock before
+  switching into maker mode, so it is not adversarial-proof, just far
+  better than an instruction the maker has to remember for an entire round.
+
+This is a Claude Code plugin feature. Gemini CLI, Codex, and Cursor still rely
+on the prompt instruction alone, since none of them have an equivalent hook
+system today.
 
 ## Develop locally
 
@@ -273,6 +305,9 @@ loopAI/
     checker.md         Claude Code subagent: strict read-only verifier
   commands/loop/
     engineer-agents.md Claude Code only: engineer, dispatched to real subagents
+  hooks/
+    hooks.json          registers l1-guard.js on Write/Edit/NotebookEdit
+    l1-guard.js         enforces .loops/.phase-lock.json, Claude Code only
   package.json         npm bin: loopai
 ```
 

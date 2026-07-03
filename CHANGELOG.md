@@ -3,6 +3,22 @@
 All notable changes to loopAI are documented here. Format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.7.0] - 2026-07-04
+
+### Added
+- Hook-enforced L1 (Claude Code only): `hooks/l1-guard.js`, a `PreToolUse`
+  hook that denies `Write`/`Edit`/`NotebookEdit` calls against
+  `.loops/.phase-lock.json`, a small lock the maker/checker orchestrator
+  writes before each phase. Blocks always during a checker phase, and during
+  a maker phase when the spec's autonomy is L1. A stale lock (>20 minutes,
+  e.g. a crashed session) fails open rather than permanently blocking edits.
+  `loopai run` sets the lock with real code (bulletproof); `engineer-agents`
+  and `engineer` set it via prompt instruction (strong, not adversarial-proof).
+  loopAI's own bookkeeping under `.loops/` is always exempt, so the
+  orchestrator can keep updating the state file and the lock itself.
+- `agents/maker.md` gained a note on what to do if a Write/Edit call comes
+  back denied by the hook: that is the lock working, not an error to retry.
+
 ## [0.6.0] - 2026-07-04
 
 ### Added
