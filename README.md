@@ -59,6 +59,25 @@ and they work in every project. The other three install per project.
 Open `.loops/state/<slug>.STATE.md` afterward to read the full round-by-round
 record.
 
+## Real subagent isolation (Claude Code only)
+
+`engineer` runs the maker and checker phases in one session, one model
+switching hats. That is portable across every tool, but it means the checker
+still shares a context window with the maker it is supposed to be skeptical of.
+
+If you installed loopAI as a native Claude Code plugin, you also get
+`loopai:maker` and `loopai:checker`, two real subagents with their own tool
+access and their own context window. `/loopai:loop:engineer-agents <slug>`
+runs the same round loop as `engineer`, but dispatches each phase to one of
+these subagents via the Task tool instead of role-switching in place. The
+checker genuinely cannot see the maker's reasoning, only the shared state file
+you would read yourself.
+
+This command only exists for Claude Code, because the Task tool and custom
+subagents are a Claude Code feature. Gemini CLI, Codex, and Cursor stay on
+`engineer`. Use `engineer-agents` when you want the strictest possible
+separation for a loop that matters; use `engineer` everywhere else.
+
 ## Skip the interview: preset specs
 
 Five proven loops ship with the CLI. Drop one in and run it, no grilling needed:
@@ -109,11 +128,37 @@ You watch the maker and checker rounds stream, answer the human gate with a
 keypress, and get the full round log in `.loops/state/<slug>.STATE.md`. L1
 specs instruct the maker to propose changes only, never edit files.
 
+### Cross-model checking
+
+`run` can put the maker and checker on different models, so the checker is not
+marking its own homework even at the CLI level:
+
+```
+loopai run pr-review --maker claude --checker gemini
+```
+
+`--maker`/`--checker` override `--agent` for just that phase. A spec can also
+pin its own pairing with `"maker"` and `"checker"` fields in the JSON, which
+win over `--agent` but lose to an explicit `--maker`/`--checker` flag on the
+command line. `loopai doctor` checks that any `maker`/`checker` fields in your
+specs are valid.
+
 Every run is recorded, and `stats` tells you which loops are earning trust:
 
 ```
 loopai stats
 # readme-sync   runs: 5   pass rate: 100%   avg rounds: 1.4   <- earning L2/L3 trust
+```
+
+Once a loop has run with more than one maker/checker pairing, `stats` breaks
+out the pass rate per pairing too, so you can see whether a stricter checker
+model is actually catching more:
+
+```
+  pr-review
+    runs: 8   pass rate: 75%   avg rounds: 2.1   last: 2026-07-01
+      checker claude -> claude: 100% pass (3 runs)
+      checker claude -> gemini: 60% pass (5 runs)
 ```
 
 A loop with three or more runs at a 100% pass rate is your signal to consider
@@ -174,6 +219,20 @@ CLI, which converts the same prompts at install time.
 /plugin install loopai@javaid-loops
 ```
 
+Plugin commands are namespaced by both the plugin name and the `commands/loop/`
+folder they live in, so every command is invoked with the full `loopai:loop:`
+prefix: `/loopai:loop:init`, `/loopai:loop:grill`, `/loopai:loop:engineer <slug>`,
+`/loopai:loop:compass`, `/loopai:loop:baton`, `/loopai:loop:harvest`,
+`/loopai:loop:guard`, plus `/loopai:loop:engineer-agents <slug>` for real
+subagent isolation (see below). Run `/help` after installing to see the full
+list. This is longer than the `/loop:init` style shown above for the
+CLI-installed version, because that one writes plain project commands instead
+of a plugin.
+
+If a plugin install ever reports a command as missing right after you add the
+marketplace, run `/plugin marketplace update javaid-loops` to refresh the
+listing before trying `/plugin install` again.
+
 **Gemini CLI, Codex CLI, Cursor (via the CLI):**
 
 ```
@@ -204,11 +263,16 @@ that run identically across Claude Code, Gemini CLI, Codex, and Cursor.
 
 ```
 loopAI/
-  bin/loopai.js        the installer
+  bin/loopai.js        the installer, and the local run/stats/cron/doctor CLI
   prompts/
     init.md            canonical init logic
     grill.md           canonical interview logic
-    engineer.md        canonical loop (maker + checker)
+    engineer.md        canonical loop (maker + checker, one session)
+  agents/
+    maker.md           Claude Code subagent: does the work
+    checker.md         Claude Code subagent: strict read-only verifier
+  commands/loop/
+    engineer-agents.md Claude Code only: engineer, dispatched to real subagents
   package.json         npm bin: loopai
 ```
 

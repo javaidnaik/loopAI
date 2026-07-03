@@ -3,6 +3,27 @@
 All notable changes to loopAI are documented here. Format follows
 Keep a Changelog, and the project uses semantic versioning.
 
+## [0.6.0] - 2026-07-04
+
+### Added
+- Cross-model checking in `loopai run`: `--maker`/`--checker` flags put the
+  maker and checker on different models (e.g. `--maker claude --checker
+  gemini`), so the checker is never marking its own homework even at the CLI
+  level. A spec can also pin its own pairing with `"maker"`/`"checker"` fields
+  in its JSON. Precedence: explicit flag > spec field > `--agent`.
+- `loopai stats` now breaks out pass rate per maker/checker pairing once a
+  loop has run with more than one, so you can see whether a stricter checker
+  model actually catches more real failures.
+- `loopai doctor` validates any `maker`/`checker` fields in your specs.
+- `agents/maker.md` and `agents/checker.md`: real Claude Code subagents
+  (`loopai:maker`, `loopai:checker`) with their own tool access and their own
+  context window, instead of one session role-switching in place.
+- `/loopai:loop:engineer-agents <slug>`: Claude Code only command that runs
+  the same maker/checker round loop as `engineer`, but dispatches each phase
+  to the new subagents via the Task tool for genuine isolation. `engineer`
+  itself is unchanged and stays portable across Claude Code, Gemini CLI,
+  Codex, and Cursor.
+
 ## [0.5.0] - 2026-07-02
 
 ### Added

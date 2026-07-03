@@ -89,10 +89,12 @@ const TOOLS = { claude: installClaude, gemini: installGemini, codex: installCode
 const PRESETS_DIR = join(__dirname, "..", "presets");
 
 function parseArgs(argv) {
-  const out = { tool: null, agent: "claude", schedule: "0 6 * * 1", _: [] };
+  const out = { tool: null, agent: "claude", maker: null, checker: null, schedule: "0 6 * * 1", _: [] };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--tool" || argv[i] === "-t") out.tool = argv[++i];
     else if (argv[i] === "--agent") out.agent = argv[++i];
+    else if (argv[i] === "--maker") out.maker = argv[++i];
+    else if (argv[i] === "--checker") out.checker = argv[++i];
     else if (argv[i] === "--schedule") out.schedule = argv[++i];
     else if (argv[i] === "--help" || argv[i] === "-h") out.help = true;
     else out._.push(argv[i]);
@@ -112,12 +114,16 @@ Usage:
   loopai doctor             check this repo's loop-readiness
   loopai run <slug>         run a loop right here via claude/gemini headless
          [--agent claude|gemini]
+         [--maker claude|gemini] [--checker claude|gemini]
   loopai stats              pass rates and avg rounds per loop, from history
   loopai upgrade            refresh installed command files after an npm update
   loopai cron <slug>        emit a GitHub Action that runs a spec on a schedule
          [--agent claude|gemini] [--schedule "0 6 * * 1"]
 
 Presets: test-first, bug-hunt, dep-bump, readme-sync, pr-review
+--maker/--checker override --agent for just that phase, so the checker can run
+on a different model than the maker. A spec's own "maker"/"checker" fields win
+over --agent but lose to an explicit --maker/--checker flag.
 Run everything from the root of the project you are adding loops to.
 `);
 }
@@ -176,6 +182,19 @@ function cmdDoctor() {
   let allParse = specs.length > 0;
   for (const f of specs) { try { JSON.parse(rf(join(specsDir, f), "utf-8")); } catch { allParse = false; console.log(`       broken JSON: ${f}`); } }
   check(allParse, "all specs parse as JSON", "fix the file(s) named above");
+  let agentFieldsOk = true;
+  for (const f of specs) {
+    try {
+      const s = JSON.parse(rf(join(specsDir, f), "utf-8"));
+      for (const key of ["maker", "checker"]) {
+        if (s[key] && !["claude", "gemini"].includes(s[key])) {
+          agentFieldsOk = false;
+          console.log(`       invalid "${key}" in ${f}: must be claude or gemini`);
+        }
+      }
+    } catch { /* already flagged above */ }
+  }
+  check(agentFieldsOk, `maker/checker fields (if set) are claude or gemini`, "fix the field(s) named above");
   let testCmd = false;
   try { const p = JSON.parse(rf(join(cwd, "package.json"), "utf-8")); testCmd = Boolean(p.scripts && p.scripts.test && !/no test specified/.test(p.scripts.test)); } catch { /* not a node repo */ }
   check(testCmd, "a real test command exists (checker can verify)", "add a test script so the checker has teeth");
@@ -220,19 +239,24 @@ function recordHistory(cwd, entry) {
 
 async function cmdRun(args) {
   const slug = args._[0];
-  if (!slug) { console.error("Usage: loopai run <spec-slug> [--agent claude|gemini]"); process.exit(1); }
-  const agent = args.agent;
-  if (!["claude", "gemini"].includes(agent)) { console.error("--agent must be claude or gemini."); process.exit(1); }
+  if (!slug) { console.error("Usage: loopai run <spec-slug> [--agent claude|gemini] [--maker claude|gemini] [--checker claude|gemini]"); process.exit(1); }
   const cwd = process.cwd();
   const specPath = join(cwd, ".loops", "specs", `${slug}.json`);
   if (!existsSync(specPath)) { console.error(`No spec at .loops/specs/${slug}.json. Try 'loopai list' or 'loopai spec'.`); process.exit(1); }
   const spec = JSON.parse(readFileSync(specPath, "utf-8"));
+
+  // Precedence: explicit --maker/--checker > spec's own maker/checker field > --agent.
+  const makerAgent = args.maker || spec.maker || args.agent;
+  const checkerAgent = args.checker || spec.checker || args.agent;
+  if (!["claude", "gemini"].includes(makerAgent)) { console.error(`--maker must be claude or gemini (got '${makerAgent}').`); process.exit(1); }
+  if (!["claude", "gemini"].includes(checkerAgent)) { console.error(`--checker must be claude or gemini (got '${checkerAgent}').`); process.exit(1); }
+
   const ctxPath = join(cwd, ".loops", "CONTEXT.md");
   const context = existsSync(ctxPath) ? readFileSync(ctxPath, "utf-8") : "(no CONTEXT.md - agents work from the spec alone)";
 
   const statePath = join(cwd, ".loops", "state", `${slug}.STATE.md`);
   mkdirSync(dirname(statePath), { recursive: true });
-  let state = `# STATE - ${spec.goal}\n\n## Goal\n${spec.goal}\n\n## Rules\n${(spec.rules || []).map((r) => `- ${r}`).join("\n")}\n\n## Inputs\n${(spec.inputs || []).map((i) => `- ${i}`).join("\n")}\n\n## Autonomy\n${spec.autonomy} | humanGate: ${spec.humanGate}\n\n## Round Log\n\n## Verdict\nPENDING\n`;
+  let state = `# STATE - ${spec.goal}\n\n## Goal\n${spec.goal}\n\n## Rules\n${(spec.rules || []).map((r) => `- ${r}`).join("\n")}\n\n## Inputs\n${(spec.inputs || []).map((i) => `- ${i}`).join("\n")}\n\n## Autonomy\n${spec.autonomy} | humanGate: ${spec.humanGate}\n\n## Agents\nmaker: ${makerAgent} | checker: ${checkerAgent}\n\n## Round Log\n\n## Verdict\nPENDING\n`;
   const saveState = () => writeFileSync(statePath, state);
   const log = (t) => { state = state.replace("## Verdict", `${t}\n\n## Verdict`); saveState(); };
   const setVerdict = (v) => { state = state.replace(/## Verdict\n[\s\S]*$/, `## Verdict\n${v}\n`); saveState(); };
@@ -242,7 +266,8 @@ async function cmdRun(args) {
     ? "\nAUTONOMY L1: do NOT modify any project file. Write your proposed change (diff or snippet) as your reply instead."
     : "";
   const maxRounds = spec.maxRounds || 4;
-  console.log(`Running '${slug}' with ${agent} (${spec.autonomy}, gate: ${spec.humanGate}, max ${maxRounds} rounds)\n`);
+  const pairingNote = makerAgent === checkerAgent ? "" : "  (cross-model check)";
+  console.log(`Running '${slug}' - maker: ${makerAgent}, checker: ${checkerAgent}${pairingNote} (${spec.autonomy}, gate: ${spec.humanGate}, max ${maxRounds} rounds)\n`);
 
   let finalVerdict = `NO PASS after ${maxRounds} rounds - escalated to human`;
   let roundsUsed = maxRounds;
@@ -250,17 +275,17 @@ async function cmdRun(args) {
     console.log(`===== ROUND ${round} =====`);
     const blob = `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`;
 
-    const draft = callAgent(agent,
+    const draft = callAgent(makerAgent,
       `You are the MAKER in a maker/checker loop. Produce or revise work toward the Goal in the shared state provided on stdin. If the Round Log has CHECKER fixes, address exactly those. Stay inside the Rules and Inputs. Reply with only your output, no preamble.${l1Note}`,
       blob);
-    console.log(`\nMAKER:\n${draft.slice(0, 2000)}${draft.length > 2000 ? "\n...(truncated in console, full text in STATE)" : ""}\n`);
-    log(`### Round ${round} - MAKER\n${draft}\n`);
+    console.log(`\nMAKER (${makerAgent}):\n${draft.slice(0, 2000)}${draft.length > 2000 ? "\n...(truncated in console, full text in STATE)" : ""}\n`);
+    log(`### Round ${round} - MAKER (${makerAgent})\n${draft}\n`);
 
-    const review = callAgent(agent,
+    const review = callAgent(checkerAgent,
       `You are the CHECKER in a maker/checker loop, a strict read-only verifier. Check the latest MAKER output in the shared state on stdin against EVERY rule plus the Goal. Do not modify files. First line of your reply must be exactly PASS or FAIL; if FAIL, follow with a short bullet list of exactly what to fix. No preamble.`,
       `REPO CONTEXT:\n${context}\n\nSHARED STATE:\n${state}`);
-    console.log(`CHECKER:\n${review.slice(0, 1500)}\n`);
-    log(`### Round ${round} - CHECKER\n${review}\n`);
+    console.log(`CHECKER (${checkerAgent}):\n${review.slice(0, 1500)}\n`);
+    log(`### Round ${round} - CHECKER (${checkerAgent})\n${review}\n`);
 
     if (review.toUpperCase().startsWith("PASS")) {
       const needGate = spec.humanGate || spec.autonomy !== "L3";
@@ -274,7 +299,7 @@ async function cmdRun(args) {
     }
   }
   setVerdict(finalVerdict);
-  recordHistory(cwd, { slug, agent, verdict: finalVerdict.startsWith("PASS") ? "PASS" : "NO_PASS", rounds: roundsUsed, autonomy: spec.autonomy, date: new Date().toISOString() });
+  recordHistory(cwd, { slug, maker: makerAgent, checker: checkerAgent, agent: makerAgent, verdict: finalVerdict.startsWith("PASS") ? "PASS" : "NO_PASS", rounds: roundsUsed, autonomy: spec.autonomy, date: new Date().toISOString() });
   console.log(`\nVerdict: ${finalVerdict}`);
   console.log(`Full round log: .loops/state/${slug}.STATE.md`);
 }
@@ -288,18 +313,34 @@ function cmdStats() {
   if (!rows.length) { console.log("History file is empty."); return; }
   const bySlug = {};
   for (const r of rows) {
-    bySlug[r.slug] ||= { runs: 0, pass: 0, rounds: 0, last: "" };
+    bySlug[r.slug] ||= { runs: 0, pass: 0, rounds: 0, last: "", pairings: {} };
     const s = bySlug[r.slug];
     s.runs++; if (r.verdict === "PASS") s.pass++; s.rounds += r.rounds || 0; s.last = r.date || s.last;
+    const maker = r.maker || r.agent || "claude";
+    const checker = r.checker || r.agent || "claude";
+    const key = `${maker} -> ${checker}`;
+    s.pairings[key] ||= { runs: 0, pass: 0 };
+    s.pairings[key].runs++;
+    if (r.verdict === "PASS") s.pairings[key].pass++;
   }
   console.log(`Loop stats (${rows.length} runs recorded)\n`);
   for (const [slug, s] of Object.entries(bySlug)) {
     const rate = Math.round((s.pass / s.runs) * 100);
     const avg = (s.rounds / s.runs).toFixed(1);
     const trust = rate === 100 && s.runs >= 3 ? "  <- earning L2/L3 trust" : "";
-    console.log(`  ${slug}\n    runs: ${s.runs}   pass rate: ${rate}%   avg rounds: ${avg}   last: ${s.last.slice(0, 10)}${trust}\n`);
+    console.log(`  ${slug}\n    runs: ${s.runs}   pass rate: ${rate}%   avg rounds: ${avg}   last: ${s.last.slice(0, 10)}${trust}`);
+    const pairings = Object.entries(s.pairings);
+    if (pairings.length > 1) {
+      for (const [key, pr] of pairings) {
+        const prate = Math.round((pr.pass / pr.runs) * 100);
+        console.log(`      checker ${key}: ${prate}% pass (${pr.runs} run${pr.runs === 1 ? "" : "s"})`);
+      }
+    }
+    console.log("");
   }
   console.log("A loop with 3+ runs at 100% pass is a candidate for more autonomy.");
+  console.log("A loop run with more than one maker/checker pairing shows a per-pairing breakdown above,");
+  console.log("useful for seeing whether a different checker model catches more real failures.");
 }
 
 // --- upgrade: refresh installed command files after an npm update ------------
